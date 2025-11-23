@@ -296,6 +296,7 @@ class PAWSStreamlined:
             users = self.iam.list_users().get('Users', [])
             users_without_mfa = []
             old_access_keys = []
+            score_breakdown: List[Dict[str, Any]] = []
             
             for user in users:
                 user_name = user.get('UserName')
@@ -321,6 +322,7 @@ class PAWSStreamlined:
             
             # Calculate score
             if users_without_mfa:
+                deduction = min(10, len(users_without_mfa) * 2)
                 findings.append({
                     'category': 'IAM',
                     'severity': 'medium',
@@ -328,16 +330,27 @@ class PAWSStreamlined:
                     'count': len(users_without_mfa),
                     'users': users_without_mfa[:10]  # Limit to first 10
                 })
-                score -= min(10, len(users_without_mfa) * 2)
+                score -= deduction
+                score_breakdown.append({
+                    'control': 'MFA coverage',
+                    'deduction': deduction,
+                    'details': f"{len(users_without_mfa)} user(s) without MFA"
+                })
             
             if old_access_keys:
+                deduction = min(10, len(old_access_keys))
                 findings.append({
                     'category': 'IAM',
                     'severity': 'medium',
                     'title': 'Old access keys (>90 days)',
                     'count': len(old_access_keys)
                 })
-                score -= min(10, len(old_access_keys))
+                score -= deduction
+                score_breakdown.append({
+                    'control': 'Old access keys',
+                    'deduction': deduction,
+                    'details': f"{len(old_access_keys)} access key(s) older than 90 days"
+                })
             
             # Check password policy
             try:
@@ -355,7 +368,13 @@ class PAWSStreamlined:
                     'title': 'Password policy',
                     'status': 'not configured'
                 })
-                score -= 5
+                password_deduction = 5
+                score -= password_deduction
+                score_breakdown.append({
+                    'control': 'Password policy',
+                    'deduction': password_deduction,
+                    'details': 'No account password policy configured'
+                })
             
             score = max(0, min(100, score))
             
@@ -363,14 +382,18 @@ class PAWSStreamlined:
                 'account_id': account_id,
                 'security_score': score,
                 'findings': findings,
-                'timestamp': datetime.utcnow().isoformat() + 'Z'
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'score_breakdown': score_breakdown,
+                'baseline_score': 100
             }
             
         except Exception as e:
             return {
                 'error': str(e),
                 'security_score': 0,
-                'findings': []
+                'findings': [],
+                'score_breakdown': [],
+                'baseline_score': 100
             }
     
     def basic_s3_check(self) -> Dict[str, Any]:
@@ -459,11 +482,17 @@ class PAWSStreamlined:
         """Run basic security audit using boto3"""
         console.print("[bold blue]Running Basic Security Audit...[/bold blue]")
         
-        results = {
+        iam_results: Dict[str, Any] = {}
+        s3_results: Dict[str, Any] = {}
+        ec2_results: Dict[str, Any] = {}
+
+        results: Dict[str, Any] = {
             'timestamp': datetime.utcnow().isoformat() + 'Z',
             'region': self.region,
             'profile': self.profile,
-            'checks': {}
+            'checks': {},
+            'baseline_score': 100,
+            'score_breakdown': []
         }
         
         # IAM check
@@ -490,6 +519,9 @@ class PAWSStreamlined:
             results['overall_score'] = sum(scores) // len(scores)
         else:
             results['overall_score'] = 0
+        
+        results['baseline_score'] = iam_results.get('baseline_score', 100)
+        results['score_breakdown'] = iam_results.get('score_breakdown', [])
         
         # Save to file if requested
         if output_file:
@@ -529,26 +561,62 @@ class PAWSStreamlined:
 
             # Score explanation
             checks = results.get('checks', {})
+            breakdown = results.get('score_breakdown', [])
+            baseline = results.get('baseline_score', 100)
             score_lines = [
-                "Overall security score is currently derived from IAM controls (MFA usage, access key hygiene, and password policy).",
-                "S3 and EC2 checks contribute findings but are informational until numerical scoring is added."
+                f"Baseline score: {baseline} points.",
+                "Deductions were applied based on IAM controls (MFA usage, access key hygiene, password policy).",
+                "S3 and EC2 findings are currently informational until numeric scoring is added."
             ]
-            iam_score = checks.get('iam', {}).get('security_score')
-            if iam_score is not None:
-                score_lines.append(f"IAM security score: {iam_score}/100.")
-                iam_findings = checks.get('iam', {}).get('findings', [])
-                for finding in iam_findings:
-                    title = finding.get('title')
-                    if title == 'Users without MFA':
-                        count = finding.get('count', 0)
-                        score_lines.append(f"- Deduction applied for {count} user(s) without MFA.")
-                    if title == 'Old access keys (>90 days)':
-                        count = finding.get('count', 0)
-                        score_lines.append(f"- {count} access key(s) older than 90 days triggered a deduction.")
-                    if title == 'Password policy' and finding.get('status') == 'not configured':
-                        score_lines.append("- Missing account password policy caused a deduction.")
+            if breakdown:
+                score_lines.append("Detailed deductions:")
+                for entry in breakdown:
+                    control = entry.get('control', 'Control')
+                    deduction = entry.get('deduction', 0)
+                    details = entry.get('details', '')
+                    score_lines.append(f"- {control}: -{deduction} pts ({details})")
+            else:
+                score_lines.append("No deductions applied; perfect score.")
+            score_lines.append(f"Final score: {results.get('overall_score', 0)}/100.")
             elements.append(Paragraph("Score Explanation", styles['Heading2']))
             elements.append(Paragraph("<br/>".join(score_lines), styles['Normal']))
+            elements.append(Spacer(1, 12))
+
+            # Key findings
+            key_points: List[str] = []
+            severity_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4}
+            for service, data in checks.items():
+                for finding in data.get('findings', []):
+                    severity = finding.get('severity', 'info')
+                    title = finding.get('title', 'Finding')
+                    detail_parts = []
+                    if finding.get('count') is not None:
+                        detail_parts.append(f"Count: {finding['count']}")
+                    if finding.get('users'):
+                        detail_parts.append(f"Users: {', '.join(finding['users'])}")
+                    if finding.get('status'):
+                        detail_parts.append(f"Status: {finding['status']}")
+                    if finding.get('bucket'):
+                        detail_parts.append(f"Bucket: {finding['bucket']}")
+                    if finding.get('security_group'):
+                        detail_parts.append(f"Security Group: {finding['security_group']}")
+                    if finding.get('port'):
+                        detail_parts.append(f"Port: {finding['port']}")
+                    if finding.get('issue'):
+                        detail_parts.append(f"Issue: {finding['issue']}")
+                    detail_text = "; ".join(detail_parts) or "See summary table for more details"
+                    key_points.append({
+                        'severity_order': severity_order.get(severity.lower(), 5),
+                        'text': f"{service.upper()} • {title} ({severity}) — {detail_text}"
+                    })
+
+            key_points.sort(key=lambda x: x['severity_order'])
+            elements.append(Paragraph("Key Findings", styles['Heading2']))
+            if key_points:
+                for point in key_points[:10]:
+                    elements.append(Paragraph(f"• {point['text']}", styles['Normal']))
+            else:
+                elements.append(Paragraph("No findings detected across IAM, S3, or EC2 checks.", styles['Normal']))
             elements.append(Spacer(1, 12))
 
             table_data = [["Service", "Item", "Severity", "Details"]]
