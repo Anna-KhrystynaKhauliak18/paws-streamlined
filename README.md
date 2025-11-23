@@ -98,6 +98,21 @@ python3 paws_streamlined.py --profile production --region us-east-1
 - **CloudMapper**: Infrastructure visualization and security analysis
 - **aws-public-ips**: Find all publicly accessible resources
 
+## 📝 Reporting Outputs
+
+- JSON reports are saved via `--output` (e.g., `audit.json`)
+- A PDF report is generated automatically for every audit
+  - Default path: `audit_report.pdf`
+  - Customize with `--pdf-output /path/report.pdf`
+
+Example:
+
+```bash
+python3 paws_streamlined.py --audit --output audit.json --pdf-output reports/security_report.pdf
+```
+
+PDF generation uses ReportLab (installed via `pip install -r paws_streamlined_requirements.txt`).
+
 ## 🎯 Key Differences from Full PAWS
 
 | Feature | Full PAWS | Streamlined |

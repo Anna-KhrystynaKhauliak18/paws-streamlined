@@ -28,6 +28,15 @@ except ImportError:
         def print(self, *args, **kwargs):
             print(*args)
 
+try:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib import colors
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
+
 console = Console() if RICH_AVAILABLE else Console()
 
 
@@ -446,7 +455,7 @@ class PAWSStreamlined:
         except Exception as e:
             return {'error': str(e), 'findings': []}
     
-    def run_basic_audit(self, output_file: str = None) -> Dict[str, Any]:
+    def run_basic_audit(self, output_file: str = None, pdf_output: str = None) -> Dict[str, Any]:
         """Run basic security audit using boto3"""
         console.print("[bold blue]Running Basic Security Audit...[/bold blue]")
         
@@ -488,8 +497,65 @@ class PAWSStreamlined:
             with open(output_file, 'w') as f:
                 json.dump(results, f, indent=2, default=str)
             console.print(f"[green]Results saved to {output_file}[/green]")
+
+        if pdf_output:
+            self._generate_pdf_report(results, pdf_output)
         
         return results
+
+    def _generate_pdf_report(self, results: Dict[str, Any], pdf_path: str) -> None:
+        """Generate a PDF report from results"""
+        if not REPORTLAB_AVAILABLE:
+            console.print("[yellow]ReportLab not installed; skipping PDF generation.[/yellow]")
+            return
+        try:
+            pdf_file = Path(pdf_path)
+            pdf_file.parent.mkdir(parents=True, exist_ok=True)
+
+            doc = SimpleDocTemplate(str(pdf_file), pagesize=letter)
+            styles = getSampleStyleSheet()
+            elements = []
+
+            elements.append(Paragraph("PAWS Streamlined Security Report", styles['Title']))
+            elements.append(Spacer(1, 12))
+            meta_info = (
+                f"Timestamp: {results.get('timestamp', 'N/A')}<br/>"
+                f"Region: {results.get('region', 'N/A')}<br/>"
+                f"Profile: {results.get('profile') or 'default'}<br/>"
+                f"Overall Security Score: {results.get('overall_score', 0)}/100"
+            )
+            elements.append(Paragraph(meta_info, styles['Normal']))
+            elements.append(Spacer(1, 12))
+
+            table_data = [["Service", "Status", "Findings / Notes"]]
+            checks = results.get('checks', {})
+            for service, data in checks.items():
+                status = "OK"
+                notes = ""
+                findings = data.get('findings', [])
+                if data.get('error'):
+                    status = "Error"
+                    notes = data['error']
+                elif findings:
+                    status = "Findings"
+                    notes = ", ".join(f"{f.get('title')} ({f.get('severity')})" for f in findings)
+                table_data.append([service.upper(), status, notes or "None"])
+
+            table = Table(table_data, hAlign='LEFT', colWidths=[100, 80, 300])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ]))
+            elements.append(table)
+
+            doc.build(elements)
+            console.print(f"[green]PDF report saved to {pdf_file}[/green]")
+        except Exception as e:
+            console.print(f"[red]Failed to generate PDF report: {e}[/red]")
     
     def display_audit_results(self, results: Dict[str, Any]):
         """Display audit results in a formatted table"""
@@ -556,6 +622,7 @@ Examples:
     parser.add_argument('--public-ips', action='store_true', help='Run aws-public-ips')
     parser.add_argument('--all', action='store_true', help='Run all available tools')
     parser.add_argument('--output', '-o', help='Output file for audit results (JSON)')
+    parser.add_argument('--pdf-output', help='Output PDF file for audit results', default='audit_report.pdf')
     parser.add_argument('--pacu-modules', help='PACU modules to run (comma-separated)')
     
     args = parser.parse_args()
@@ -584,7 +651,7 @@ Examples:
     
     # Run operations
     if args.audit or args.all:
-        results = paws.run_basic_audit(output_file=args.output)
+        results = paws.run_basic_audit(output_file=args.output, pdf_output=args.pdf_output)
         paws.display_audit_results(results)
     
     if args.pacu or args.all:

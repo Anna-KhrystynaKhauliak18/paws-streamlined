@@ -7,6 +7,9 @@ boto3>=1.26.0
 # Optional: Rich terminal formatting (recommended)
 rich>=13.0.0
 
+# Reporting
+reportlab>=3.6.0
+
 # External tools (install separately):
 # - PACU: git clone https://github.com/RhinoSecurityLabs/pacu.git tools/pacu
 # - Scout Suite: pip install scout-suite
