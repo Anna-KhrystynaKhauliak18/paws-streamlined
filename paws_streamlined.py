@@ -864,6 +864,9 @@ class PAWSStreamlined:
                         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
                         ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                        ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
                     ]
                     for idx, ctrl in enumerate(data.get('controls', []), start=1):
                         status_text = "PASS" if ctrl.get('status') == 'pass' else "FAIL"
@@ -876,7 +879,11 @@ class PAWSStreamlined:
                         ])
                         row_color = colors.lightgreen if ctrl.get('status') == 'pass' else colors.salmon
                         row_styles.append(('BACKGROUND', (0, idx), (-1, idx), row_color))
-                    standard_table = Table(standard_table_data, hAlign='LEFT', colWidths=[60, 230, 50, 220])
+                    standard_table = Table(
+                        standard_table_data,
+                        hAlign='LEFT',
+                        colWidths=[70, 240, 90, 190]
+                    )
                     standard_table.setStyle(TableStyle(row_styles))
                     elements.append(standard_table)
                     elements.append(Spacer(1, 12))
