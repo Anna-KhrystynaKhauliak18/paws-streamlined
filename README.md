@@ -106,6 +106,7 @@ python3 paws_streamlined.py --profile production --region us-east-1
   - Customize with `--pdf-output /path/report.pdf`
 - JSON output now includes `score_breakdown` entries so you can see every deduction applied to the 100-point baseline.
 - PDF output includes a **Score Explanation** section plus a detailed findings table (service, item, severity, details).
+- PDF report also contains a **Scoring Methodology** section detailing the exact deductions (MFA, old keys, password policy) used on the 100-point scale.
 
 Example:
 

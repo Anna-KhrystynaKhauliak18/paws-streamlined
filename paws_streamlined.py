@@ -559,6 +559,20 @@ class PAWSStreamlined:
             elements.append(Paragraph("<br/>".join(meta_info), styles['Normal']))
             elements.append(Spacer(1, 12))
 
+            # Scoring methodology
+            scoring_lines = [
+                "Scoring Methodology (100-point scale):",
+                "• Start at 100 points (IAM baseline).",
+                "• Missing MFA: -2 points per user (maximum -10).",
+                "• Old access keys (>90 days): -1 point per key (maximum -10).",
+                "• Missing password policy: -5 points.",
+                "• S3/EC2 findings are informational until weighted scoring is enabled."
+            ]
+            elements.append(Paragraph("Scoring Methodology", styles['Heading2']))
+            for line in scoring_lines:
+                elements.append(Paragraph(line, styles['Normal']))
+            elements.append(Spacer(1, 12))
+
             # Score explanation
             checks = results.get('checks', {})
             breakdown = results.get('score_breakdown', [])
