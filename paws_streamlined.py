@@ -518,30 +518,93 @@ class PAWSStreamlined:
 
             elements.append(Paragraph("PAWS Streamlined Security Report", styles['Title']))
             elements.append(Spacer(1, 12))
-            meta_info = (
-                f"Timestamp: {results.get('timestamp', 'N/A')}<br/>"
-                f"Region: {results.get('region', 'N/A')}<br/>"
-                f"Profile: {results.get('profile') or 'default'}<br/>"
-                f"Overall Security Score: {results.get('overall_score', 0)}/100"
-            )
-            elements.append(Paragraph(meta_info, styles['Normal']))
+            meta_info = [
+                f"Timestamp: {results.get('timestamp', 'N/A')}",
+                f"Region: {results.get('region', 'N/A')}",
+                f"Profile: {results.get('profile') or 'default'}",
+                f"Overall Security Score: {results.get('overall_score', 0)}/100",
+            ]
+            elements.append(Paragraph("<br/>".join(meta_info), styles['Normal']))
             elements.append(Spacer(1, 12))
 
-            table_data = [["Service", "Status", "Findings / Notes"]]
+            # Score explanation
+            checks = results.get('checks', {})
+            score_lines = [
+                "Overall security score is currently derived from IAM controls (MFA usage, access key hygiene, and password policy).",
+                "S3 and EC2 checks contribute findings but are informational until numerical scoring is added."
+            ]
+            iam_score = checks.get('iam', {}).get('security_score')
+            if iam_score is not None:
+                score_lines.append(f"IAM security score: {iam_score}/100.")
+                iam_findings = checks.get('iam', {}).get('findings', [])
+                for finding in iam_findings:
+                    title = finding.get('title')
+                    if title == 'Users without MFA':
+                        count = finding.get('count', 0)
+                        score_lines.append(f"- Deduction applied for {count} user(s) without MFA.")
+                    if title == 'Old access keys (>90 days)':
+                        count = finding.get('count', 0)
+                        score_lines.append(f"- {count} access key(s) older than 90 days triggered a deduction.")
+                    if title == 'Password policy' and finding.get('status') == 'not configured':
+                        score_lines.append("- Missing account password policy caused a deduction.")
+            elements.append(Paragraph("Score Explanation", styles['Heading2']))
+            elements.append(Paragraph("<br/>".join(score_lines), styles['Normal']))
+            elements.append(Spacer(1, 12))
+
+            table_data = [["Service", "Item", "Severity", "Details"]]
             checks = results.get('checks', {})
             for service, data in checks.items():
-                status = "OK"
-                notes = ""
+                service_label = service.upper()
                 findings = data.get('findings', [])
-                if data.get('error'):
-                    status = "Error"
-                    notes = data['error']
-                elif findings:
-                    status = "Findings"
-                    notes = ", ".join(f"{f.get('title')} ({f.get('severity')})" for f in findings)
-                table_data.append([service.upper(), status, notes or "None"])
 
-            table = Table(table_data, hAlign='LEFT', colWidths=[100, 80, 300])
+                # Summary row
+                summary_bits = []
+                if 'security_score' in data:
+                    summary_bits.append(f"Score: {data['security_score']}/100")
+                if 'buckets_checked' in data:
+                    summary_bits.append(f"Buckets checked: {data['buckets_checked']}")
+                if 'security_groups_checked' in data:
+                    summary_bits.append(f"Security groups checked: {data['security_groups_checked']}")
+                if summary_bits:
+                    table_data.append([service_label, "Summary", "info", "; ".join(summary_bits)])
+                    service_label = ""
+
+                # Error row
+                if data.get('error'):
+                    table_data.append([service_label or service.upper(), "Error", "critical", data['error']])
+                    service_label = ""
+
+                # Finding rows
+                if findings:
+                    for finding in findings:
+                        detail_parts = []
+                        if finding.get('count') is not None:
+                            detail_parts.append(f"Count: {finding['count']}")
+                        if finding.get('users'):
+                            detail_parts.append(f"Users: {', '.join(finding['users'])}")
+                        if finding.get('status'):
+                            detail_parts.append(f"Status: {finding['status']}")
+                        if finding.get('bucket'):
+                            detail_parts.append(f"Bucket: {finding['bucket']}")
+                        if finding.get('security_group'):
+                            detail_parts.append(f"Security Group: {finding['security_group']}")
+                        if finding.get('port'):
+                            detail_parts.append(f"Port: {finding['port']}")
+                        if finding.get('issue'):
+                            detail_parts.append(f"Issue: {finding['issue']}")
+                        detail_text = "; ".join(detail_parts) or finding.get('title', 'See details')
+                        table_data.append([
+                            service_label or service.upper(),
+                            finding.get('title', 'Finding'),
+                            finding.get('severity', 'info'),
+                            detail_text
+                        ])
+                        service_label = ""
+
+                if not findings and not data.get('error'):
+                    table_data.append([service_label or service.upper(), "No issues", "info", "All checks passed."])
+
+            table = Table(table_data, hAlign='LEFT', colWidths=[90, 140, 80, 250])
             table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
