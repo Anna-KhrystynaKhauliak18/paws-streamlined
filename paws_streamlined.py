@@ -12,7 +12,7 @@ import subprocess
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
 
@@ -38,6 +38,125 @@ except ImportError:
     REPORTLAB_AVAILABLE = False
 
 console = Console() if RICH_AVAILABLE else Console()
+
+
+def _finding_by_title(service_data: Dict[str, Any], title: str) -> Optional[Dict[str, Any]]:
+    for finding in service_data.get('findings', []):
+        if finding.get('title') == title:
+            return finding
+    return None
+
+
+def eval_mfa(service_data: Dict[str, Any]) -> Tuple[bool, str]:
+    if service_data.get('error'):
+        return False, f"Unable to evaluate: {service_data.get('error')}"
+    finding = _finding_by_title(service_data, 'Users without MFA')
+    if finding and finding.get('count', 0) > 0:
+        return False, f"{finding.get('count', 0)} user(s) without MFA."
+    return True, "All IAM users have MFA enforced."
+
+
+def eval_old_keys(service_data: Dict[str, Any]) -> Tuple[bool, str]:
+    if service_data.get('error'):
+        return False, f"Unable to evaluate: {service_data.get('error')}"
+    finding = _finding_by_title(service_data, 'Old access keys (>90 days)')
+    if finding and finding.get('count', 0) > 0:
+        return False, f"{finding.get('count', 0)} access key(s) older than 90 days."
+    return True, "No IAM access keys older than 90 days."
+
+
+def eval_password_policy(service_data: Dict[str, Any]) -> Tuple[bool, str]:
+    if service_data.get('error'):
+        return False, f"Unable to evaluate: {service_data.get('error')}"
+    finding = _finding_by_title(service_data, 'Password policy')
+    if finding and finding.get('status') == 'not configured':
+        return False, "Account password policy is not configured."
+    return True, "Password policy is configured."
+
+
+STANDARD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
+    'cis': {
+        'name': 'CIS AWS Foundations Benchmark',
+        'version': '1.5',
+        'controls': [
+            {
+                'id': '1.1',
+                'title': 'Ensure MFA is enabled for console access',
+                'service': 'iam',
+                'evaluator': eval_mfa,
+                'description': 'IAM users with console access should have MFA enabled.'
+            },
+            {
+                'id': '1.4',
+                'title': 'Ensure access keys are rotated every 90 days or less',
+                'service': 'iam',
+                'evaluator': eval_old_keys,
+                'description': 'Inactive or old IAM access keys should be rotated.'
+            },
+            {
+                'id': '1.5',
+                'title': 'Ensure IAM password policy requires strong passwords',
+                'service': 'iam',
+                'evaluator': eval_password_policy,
+                'description': 'Account password policy must be configured for strong passwords.'
+            },
+        ]
+    },
+    'nist': {
+        'name': 'NIST Cybersecurity Framework',
+        'version': '1.1',
+        'controls': [
+            {
+                'id': 'PR.AC-1',
+                'title': 'Identities and credentials are managed',
+                'service': 'iam',
+                'evaluator': eval_mfa,
+                'description': 'Access control requires multi-factor authentication.'
+            },
+            {
+                'id': 'PR.AC-5',
+                'title': 'Network integrity is protected',
+                'service': 'iam',
+                'evaluator': eval_old_keys,
+                'description': 'Credential rotation helps maintain access integrity.'
+            },
+            {
+                'id': 'PR.IP-2',
+                'title': 'Configuration change control processes are in place',
+                'service': 'iam',
+                'evaluator': eval_password_policy,
+                'description': 'Password policies align with organizational standards.'
+            },
+        ]
+    },
+    'pcidss': {
+        'name': 'PCI DSS',
+        'version': '3.2.1',
+        'controls': [
+            {
+                'id': '8.3',
+                'title': 'Secure all individual non-console administrative access with MFA',
+                'service': 'iam',
+                'evaluator': eval_mfa,
+                'description': 'Administrative access must enforce MFA.'
+            },
+            {
+                'id': '8.2',
+                'title': 'Employ at least one of the following methods to authenticate all users',
+                'service': 'iam',
+                'evaluator': eval_password_policy,
+                'description': 'Strong password policy must be enforced.'
+            },
+            {
+                'id': '8.1.4',
+                'title': 'Remove/disable inactive user accounts within 90 days',
+                'service': 'iam',
+                'evaluator': eval_old_keys,
+                'description': 'Access keys older than 90 days should be rotated/removed.'
+            },
+        ]
+    },
+}
 
 
 class PAWSStreamlined:
@@ -478,7 +597,8 @@ class PAWSStreamlined:
         except Exception as e:
             return {'error': str(e), 'findings': []}
     
-    def run_basic_audit(self, output_file: str = None, pdf_output: str = None) -> Dict[str, Any]:
+    def run_basic_audit(self, output_file: str = None, pdf_output: str = None,
+                        standards: Optional[List[str]] = None) -> Dict[str, Any]:
         """Run basic security audit using boto3"""
         console.print("[bold blue]Running Basic Security Audit...[/bold blue]")
         
@@ -522,6 +642,12 @@ class PAWSStreamlined:
         
         results['baseline_score'] = iam_results.get('baseline_score', 100)
         results['score_breakdown'] = iam_results.get('score_breakdown', [])
+
+        selected_standards = standards or []
+        if not selected_standards:
+            selected_standards = list(STANDARD_DEFINITIONS.keys())
+        results['standards'] = self._evaluate_standards(results, selected_standards)
+        results['selected_standards'] = selected_standards
         
         # Save to file if requested
         if output_file:
@@ -697,11 +823,62 @@ class PAWSStreamlined:
             ]))
             elements.append(table)
 
+            standards_data = results.get('standards', {})
+            if standards_data:
+                elements.append(Paragraph("Compliance Profiles", styles['Heading2']))
+                for key, data in standards_data.items():
+                    heading = f"{data['name']} v{data.get('version', '')} — {'PASS' if data['status'] == 'pass' else 'FAIL'}"
+                    elements.append(Paragraph(heading, styles['Heading3']))
+                    standard_table_data = [["Control", "Description", "Status", "Notes"]]
+                    for ctrl in data.get('controls', []):
+                        standard_table_data.append([
+                            ctrl.get('id'),
+                            ctrl.get('title'),
+                            "PASS" if ctrl.get('status') == 'pass' else "FAIL",
+                            ctrl.get('notes', '')
+                        ])
+                    standard_table = Table(standard_table_data, hAlign='LEFT', colWidths=[70, 220, 60, 210])
+                    standard_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                    ]))
+                    elements.append(standard_table)
+                    elements.append(Spacer(1, 12))
+
             doc.build(elements)
             console.print(f"[green]PDF report saved to {pdf_file}[/green]")
         except Exception as e:
             console.print(f"[red]Failed to generate PDF report: {e}[/red]")
     
+    def _evaluate_standards(self, results: Dict[str, Any], selected: List[str]) -> Dict[str, Any]:
+        evaluations: Dict[str, Any] = {}
+        checks = results.get('checks', {})
+        for key in selected:
+            definition = STANDARD_DEFINITIONS.get(key)
+            if not definition:
+                continue
+            controls_output = []
+            for ctrl in definition.get('controls', []):
+                service_data = checks.get(ctrl.get('service', ''), {})
+                passed, notes = ctrl['evaluator'](service_data)
+                controls_output.append({
+                    'id': ctrl.get('id'),
+                    'title': ctrl.get('title'),
+                    'description': ctrl.get('description'),
+                    'status': 'pass' if passed else 'fail',
+                    'notes': notes,
+                })
+            overall_status = 'pass' if all(c['status'] == 'pass' for c in controls_output) else 'fail'
+            evaluations[key] = {
+                'name': definition.get('name'),
+                'version': definition.get('version'),
+                'status': overall_status,
+                'controls': controls_output,
+            }
+        return evaluations
+
     def display_audit_results(self, results: Dict[str, Any]):
         """Display audit results in a formatted table"""
         if RICH_AVAILABLE:
@@ -768,6 +945,12 @@ Examples:
     parser.add_argument('--all', action='store_true', help='Run all available tools')
     parser.add_argument('--output', '-o', help='Output file for audit results (JSON)')
     parser.add_argument('--pdf-output', help='Output PDF file for audit results', default='audit_report.pdf')
+    parser.add_argument(
+        '--standards',
+        nargs='+',
+        choices=list(STANDARD_DEFINITIONS.keys()),
+        help='Security standards to evaluate (default: all supported profiles)'
+    )
     parser.add_argument('--pacu-modules', help='PACU modules to run (comma-separated)')
     
     args = parser.parse_args()
@@ -796,7 +979,11 @@ Examples:
     
     # Run operations
     if args.audit or args.all:
-        results = paws.run_basic_audit(output_file=args.output, pdf_output=args.pdf_output)
+        results = paws.run_basic_audit(
+            output_file=args.output,
+            pdf_output=args.pdf_output,
+            standards=args.standards
+        )
         paws.display_audit_results(results)
     
     if args.pacu or args.all:

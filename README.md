@@ -107,11 +107,20 @@ python3 paws_streamlined.py --profile production --region us-east-1
 - JSON output now includes `score_breakdown` entries so you can see every deduction applied to the 100-point baseline.
 - PDF output includes a **Score Explanation** section plus a detailed findings table (service, item, severity, details).
 - PDF report also contains a **Scoring Methodology** section detailing the exact deductions (MFA, old keys, password policy) used on the 100-point scale.
+- Compliance profiles (CIS AWS Foundations, NIST CSF, PCI DSS) are evaluated automatically unless you specify `--standards`. Each profile lists pass/fail per control in both JSON (`standards` field) and the PDF’s **Compliance Profiles** tables.
 
 Example:
 
 ```bash
 python3 paws_streamlined.py --audit --output audit.json --pdf-output reports/security_report.pdf
+
+# Evaluate only CIS controls
+python3 paws_streamlined.py --audit --standards cis
+
+# Run CIS + NIST with explicit output paths
+python3 paws_streamlined.py --audit --standards cis nist \
+  --output reports/cis_nist.json \
+  --pdf-output reports/cis_nist.pdf
 ```
 
 PDF generation uses ReportLab (installed via `pip install -r paws_streamlined_requirements.txt`).
