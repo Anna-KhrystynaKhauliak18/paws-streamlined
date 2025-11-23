@@ -661,6 +661,12 @@ class PAWSStreamlined:
         
         return results
 
+    def _wrap(self, text: str, styles, style_name: str = 'Normal'):
+        if isinstance(text, Paragraph):
+            return text
+        text = text or ''
+        return Paragraph(text.replace('\n', '<br/>'), styles[style_name])
+
     def _generate_pdf_report(self, results: Dict[str, Any], pdf_path: str) -> None:
         """Generate a PDF report from results"""
         if not REPORTLAB_AVAILABLE:
@@ -774,12 +780,22 @@ class PAWSStreamlined:
                 if 'security_groups_checked' in data:
                     summary_bits.append(f"Security groups checked: {data['security_groups_checked']}")
                 if summary_bits:
-                    table_data.append([service_label, "Summary", "info", "; ".join(summary_bits)])
+                    table_data.append([
+                        self._wrap(service_label, styles),
+                        self._wrap("Summary", styles),
+                        self._wrap("info", styles),
+                        self._wrap("; ".join(summary_bits), styles)
+                    ])
                     service_label = ""
 
                 # Error row
                 if data.get('error'):
-                    table_data.append([service_label or service.upper(), "Error", "critical", data['error']])
+                    table_data.append([
+                        self._wrap(service_label or service.upper(), styles),
+                        self._wrap("Error", styles),
+                        self._wrap("critical", styles),
+                        self._wrap(data['error'], styles)
+                    ])
                     service_label = ""
 
                 # Finding rows
@@ -802,15 +818,20 @@ class PAWSStreamlined:
                             detail_parts.append(f"Issue: {finding['issue']}")
                         detail_text = "; ".join(detail_parts) or finding.get('title', 'See details')
                         table_data.append([
-                            service_label or service.upper(),
-                            finding.get('title', 'Finding'),
-                            finding.get('severity', 'info'),
-                            detail_text
+                            self._wrap(service_label or service.upper(), styles),
+                            self._wrap(finding.get('title', 'Finding'), styles),
+                            self._wrap(finding.get('severity', 'info'), styles),
+                            self._wrap(detail_text, styles)
                         ])
                         service_label = ""
 
                 if not findings and not data.get('error'):
-                    table_data.append([service_label or service.upper(), "No issues", "info", "All checks passed."])
+                    table_data.append([
+                        self._wrap(service_label or service.upper(), styles),
+                        self._wrap("No issues", styles),
+                        self._wrap("info", styles),
+                        self._wrap("All checks passed.", styles)
+                    ])
 
             table = Table(table_data, hAlign='LEFT', colWidths=[90, 140, 80, 250])
             table.setStyle(TableStyle([
@@ -848,10 +869,10 @@ class PAWSStreamlined:
                         status_text = "PASS" if ctrl.get('status') == 'pass' else "FAIL"
                         notes = ctrl.get('notes', '')
                         standard_table_data.append([
-                            ctrl.get('id'),
-                            ctrl.get('title'),
-                            status_text,
-                            notes,
+                            self._wrap(ctrl.get('id'), styles),
+                            self._wrap(ctrl.get('title'), styles),
+                            self._wrap(status_text, styles),
+                            self._wrap(notes, styles),
                         ])
                         row_color = colors.lightgreen if ctrl.get('status') == 'pass' else colors.salmon
                         row_styles.append(('BACKGROUND', (0, idx), (-1, idx), row_color))
