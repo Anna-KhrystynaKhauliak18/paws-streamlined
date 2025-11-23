@@ -827,23 +827,36 @@ class PAWSStreamlined:
             if standards_data:
                 elements.append(Paragraph("Compliance Profiles", styles['Heading2']))
                 for key, data in standards_data.items():
-                    heading = f"{data['name']} v{data.get('version', '')} — {'PASS' if data['status'] == 'pass' else 'FAIL'}"
+                    total_controls = len(data.get('controls', []))
+                    passed_controls = len([c for c in data.get('controls', []) if c.get('status') == 'pass'])
+                    heading = f"{data['name']} v{data.get('version', '')}"
                     elements.append(Paragraph(heading, styles['Heading3']))
-                    standard_table_data = [["Control", "Description", "Status", "Notes"]]
-                    for ctrl in data.get('controls', []):
-                        standard_table_data.append([
-                            ctrl.get('id'),
-                            ctrl.get('title'),
-                            "PASS" if ctrl.get('status') == 'pass' else "FAIL",
-                            ctrl.get('notes', '')
-                        ])
-                    standard_table = Table(standard_table_data, hAlign='LEFT', colWidths=[70, 220, 60, 210])
-                    standard_table.setStyle(TableStyle([
+                    summary = (
+                        f"{'PASS' if data['status'] == 'pass' else 'FAIL'} — "
+                        f"{passed_controls}/{total_controls} controls passed."
+                    )
+                    elements.append(Paragraph(summary, styles['Normal']))
+                    elements.append(Spacer(1, 6))
+                    standard_table_data = [["Control", "Requirement", "Result", "Notes"]]
+                    row_styles = [
                         ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
                         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
                         ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                    ]))
+                    ]
+                    for idx, ctrl in enumerate(data.get('controls', []), start=1):
+                        status_text = "PASS" if ctrl.get('status') == 'pass' else "FAIL"
+                        notes = ctrl.get('notes', '')
+                        standard_table_data.append([
+                            ctrl.get('id'),
+                            ctrl.get('title'),
+                            status_text,
+                            notes,
+                        ])
+                        row_color = colors.lightgreen if ctrl.get('status') == 'pass' else colors.salmon
+                        row_styles.append(('BACKGROUND', (0, idx), (-1, idx), row_color))
+                    standard_table = Table(standard_table_data, hAlign='LEFT', colWidths=[60, 230, 50, 220])
+                    standard_table.setStyle(TableStyle(row_styles))
                     elements.append(standard_table)
                     elements.append(Spacer(1, 12))
 
