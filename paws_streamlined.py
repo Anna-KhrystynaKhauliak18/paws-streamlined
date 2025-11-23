@@ -67,39 +67,41 @@ class PAWSStreamlined:
             if path:
                 return path
         
-        # Check local tools directory
-        tools_dir = Path('tools')
-        for alt in alternatives:
-            # Try as directory with executable inside
-            tool_dir = tools_dir / alt
-            if tool_dir.exists():
-                # Look for common entry points
-                candidates = [
-                    tool_dir / f'{alt}.py',
-                    tool_dir / 'cli.py',
-                    tool_dir / alt,
-                    tool_dir / 'pacu.py',  # PACU specific
-                    tool_dir / 'scout.py',  # Scout Suite specific
-                ]
-                for candidate in candidates:
-                    if candidate.exists():
-                        return str(candidate)
-            
-            # Special handling for scout-suite directory name
-            if alt == 'scout' or alt == 'scout-suite':
-                scout_dir = tools_dir / 'scout-suite'
-                if scout_dir.exists():
-                    scout_py = scout_dir / 'scout.py'
-                    if scout_py.exists():
-                        return str(scout_py)
-            
-            # Special handling for cloudmapper directory name
-            if alt == 'cloudmapper':
-                cm_dir = tools_dir / 'cloudmapper'
-                if cm_dir.exists():
-                    cm_py = cm_dir / 'cloudmapper.py'
-                    if cm_py.exists():
-                        return str(cm_py)
+        # Check local tools directory (current dir and parent dir)
+        tools_dirs = [Path('tools'), Path('../tools')]
+        
+        for tools_dir in tools_dirs:
+            for alt in alternatives:
+                # Try as directory with executable inside
+                tool_dir = tools_dir / alt
+                if tool_dir.exists():
+                    # Look for common entry points
+                    candidates = [
+                        tool_dir / f'{alt}.py',
+                        tool_dir / 'cli.py',
+                        tool_dir / alt,
+                        tool_dir / 'pacu.py',  # PACU specific
+                        tool_dir / 'scout.py',  # Scout Suite specific
+                    ]
+                    for candidate in candidates:
+                        if candidate.exists():
+                            return str(candidate.resolve())
+                
+                # Special handling for scout-suite directory name
+                if alt == 'scout' or alt == 'scout-suite':
+                    scout_dir = tools_dir / 'scout-suite'
+                    if scout_dir.exists():
+                        scout_py = scout_dir / 'scout.py'
+                        if scout_py.exists():
+                            return str(scout_py.resolve())
+                
+                # Special handling for cloudmapper directory name
+                if alt == 'cloudmapper':
+                    cm_dir = tools_dir / 'cloudmapper'
+                    if cm_dir.exists():
+                        cm_py = cm_dir / 'cloudmapper.py'
+                        if cm_py.exists():
+                            return str(cm_py.resolve())
         
         return None
     
